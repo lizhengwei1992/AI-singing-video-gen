@@ -135,7 +135,7 @@ class ComfyUIClient:
     ) -> List[str]:
         """执行视频生成工作流"""
         # 加载单人单图工作流
-        workflow_path = f"{Config.PROJECT_BASE}/单人单图.json"
+        workflow_path = f"{Config.WORKFLOW_PATH}/singvideo.json"
         async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
             workflow_content = await f.read()
 

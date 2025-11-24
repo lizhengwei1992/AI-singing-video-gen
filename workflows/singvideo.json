@@ -166,7 +166,7 @@
   },
   "45": {
     "inputs": {
-      "value": 832
+      "value": 480
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -175,7 +175,7 @@
   },
   "46": {
     "inputs": {
-      "value": 480
+      "value": 832
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -298,7 +298,7 @@
   },
   "52": {
     "inputs": {
-      "text": "A person is singing |\nA person is singing, with natural changes in expression and movement |\nA person is singing |\nA person is singing, with natural changes in expression and movement\n"
+      "text": "A person is singing |\nA person is singing, with natural changes in expression and movement |\nA person is singing |\nA person is singing, with natural changes in expression and movement |\nA person is singing |\nA person is singing, with natural changes in expression and movement\n"
     },
     "class_type": "CR Text",
     "_meta": {
@@ -364,7 +364,7 @@
   },
   "61": {
     "inputs": {
-      "image": "1.png"
+      "image": "3.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -373,7 +373,7 @@
   },
   "62": {
     "inputs": {
-      "audio": "audio_0_0da9eb0e_007.mp3",
+      "audio": "01_1.mp3",
       "audioUI": ""
     },
     "class_type": "LoadAudio",
@@ -415,7 +415,7 @@
     "inputs": {
       "frame_rate": 25,
       "loop_count": 0,
-      "filename_prefix": "01_03",
+      "filename_prefix": "test_resize",
       "format": "video/h264-mp4",
       "pix_fmt": "yuv420p",
       "crf": 19,

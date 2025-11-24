@@ -26,9 +26,9 @@ const App: React.FC = () => {
   const [images, setImages] = useState<UploadFile[]>([])
   const [audios, setAudios] = useState<UploadFile[]>([])
   const [config, setConfig] = useState<TaskConfigType>({
-    segmentDuration: 20,
+    segmentDuration: 30,
     outputPrefix: 'my_video',
-    prompt: 'A person is singing |A person is singing, with natural changes in expression and movement |A person is singing |A person is singing, with natural changes in expression and movement',
+    prompt: 'A person is singing |A person is singing, with natural changes in expression and movement |A person is singing |A person is singing, with natural changes in expression and movement |A person is singing |A person is singing, with natural changes in expression and movement',
     imageAudioMapping: {}
   })
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null)

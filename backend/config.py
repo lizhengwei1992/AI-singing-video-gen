@@ -14,6 +14,7 @@ class Config:
     PROJECT_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     TASK_STATUS = f"{PROJECT_BASE}/task_status"
     TEMP_FILES = f"{PROJECT_BASE}/temp"
+    WORKFLOW_PATH = f"{PROJECT_BASE}/workflows"
 
     # ComfyUI API 配置
     COMFYUI_HOST = "127.0.0.1"
