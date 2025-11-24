@@ -308,7 +308,7 @@ class TaskManager:
                 await self._send_websocket_message(
                     trace_id,
                     "task_start",
-                    TaskStartEvent(task=task_info).model_dump()
+                    self._serialize_event(TaskStartEvent(task=task_info))
                 )
 
                 try:
@@ -368,10 +368,10 @@ class TaskManager:
                     await self._send_websocket_message(
                         trace_id,
                         "task_complete",
-                        TaskCompleteEvent(
+                        self._serialize_event(TaskCompleteEvent(
                             task=task_info,
                             files=[f for f in event_files if f]
-                        ).model_dump()
+                        ))
                     )
 
                     # 只有在当前任务完全完成后，才考虑重启ComfyUI（除了最后一个任务）
@@ -395,10 +395,10 @@ class TaskManager:
                     await self._send_websocket_message(
                         trace_id,
                         "task_failed",
-                        TaskFailedEvent(
+                    self._serialize_event(TaskFailedEvent(
                             task=task_info,
                             error=str(e)
-                        ).model_dump()
+                    ))
                     )
 
                 # 更新进度
@@ -500,9 +500,9 @@ class TaskManager:
             await self._send_websocket_message(
                 trace_id,
                 "batch_complete",
-                BatchCompleteEvent(
+                self._serialize_event(BatchCompleteEvent(
                     final_videos=[final_video_with_audio, final_video_no_audio]
-                ).model_dump()
+                ))
             )
 
         except Exception as e:
@@ -521,10 +521,10 @@ class TaskManager:
             await self._send_websocket_message(
                 trace_id,
                 "error",
-                ErrorEvent(
+                self._serialize_event(ErrorEvent(
                     message=str(e),
                     code="TASK_EXECUTION_ERROR"
-                ).model_dump()
+                ))
             )
 
     async def _update_task_status(
@@ -560,16 +560,17 @@ class TaskManager:
         await self._save_task_status(trace_id, task_status)
 
         # 发送进度事件
+        progress_payload = ProgressEvent(
+            stage=task_status.stage.value,
+            progress=task_status.progress,
+            current_task=task_status.current_task,
+            completed=task_status.completed,
+            total=task_status.total
+        )
         await self._send_websocket_message(
             trace_id,
             "progress",
-            ProgressEvent(
-                stage=task_status.stage.value,
-                progress=task_status.progress,
-                current_task=task_status.current_task,
-                completed=task_status.completed,
-                total=task_status.total
-            ).model_dump()
+            self._serialize_event(progress_payload)
         )
 
     async def _save_task_status(self, trace_id: str, task_status: TaskStatus):
@@ -577,6 +578,14 @@ class TaskManager:
         status_file = f"{Config.TASK_STATUS}/{trace_id}.json"
         async with aiofiles.open(status_file, 'w', encoding='utf-8') as f:
             await f.write(task_status.model_dump_json(indent=2) if hasattr(task_status, 'model_dump_json') else json.dumps(task_status.dict(), indent=2, ensure_ascii=False))
+
+    def _serialize_event(self, event_model):
+        """兼容pydantic v1/v2的序列化"""
+        if hasattr(event_model, "model_dump"):
+            return event_model.model_dump()
+        if hasattr(event_model, "dict"):
+            return event_model.dict()
+        raise TypeError(f"Unsupported event model type: {type(event_model)}")
 
     async def _send_websocket_message(self, trace_id: str, event: str, data: dict):
         """向所有连接的客户端发送 WebSocket 消息"""

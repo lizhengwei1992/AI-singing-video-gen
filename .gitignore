@@ -12,3 +12,4 @@ node_modules
 .env.test
 .env.production
 .claude
+__pycache__/
