@@ -1,0 +1,14 @@
+INFO:     Will watch for changes in these directories: ['/home/lzw/project/self_media/video_gem/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [44223] using StatReload
+INFO:     Started server process [44352]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+正在读取任务状态目录: /home/lzw/project/self_media/video_gem/task_status
+找到任务状态目录，包含 0 个任务文件
+INFO:     127.0.0.1:47118 - "GET /api/batch/all-tasks HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44352]
+INFO:     Stopping reloader process [44223]
