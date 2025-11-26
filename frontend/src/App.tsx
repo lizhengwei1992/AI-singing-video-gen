@@ -16,7 +16,6 @@ import FileUpload from './components/FileUpload'
 import FileManager from './components/FileManager'
 import TaskConfig from './components/TaskConfig'
 import TaskDetails from './components/TaskDetails'
-import { WebSocketClient } from './websocket/client'
 import { UploadFile, TaskConfig as TaskConfigType, TaskStatus } from './types'
 
 const { Header, Content } = Layout
@@ -31,12 +30,9 @@ const App: React.FC = () => {
     prompt: 'A person is singing |A person is singing, with natural changes in expression and movement |A person is singing |A person is singing, with natural changes in expression and movement |A person is singing |A person is singing, with natural changes in expression and movement',
     imageAudioMapping: {}
   })
-  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null)
   const [allTasks, setAllTasks] = useState<TaskStatus[]>([])
-  const [isConnected, setIsConnected] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
-  const [wsClient] = useState(() => new WebSocketClient())
   const [selectedImages, setSelectedImages] = useState<string[]>([])
   const [selectedAudios, setSelectedAudios] = useState<string[]>([])
   const [existingImages, setExistingImages] = useState<any[]>([])
@@ -59,56 +55,6 @@ const App: React.FC = () => {
     }
   }, [])
 
-  // WebSocket 事件监听
-  useEffect(() => {
-    wsClient.on('connection', () => {
-      setIsConnected(true)
-      message.success('WebSocket 连接成功')
-    })
-
-    wsClient.on('disconnect', () => {
-      setIsConnected(false)
-      message.warning('WebSocket 连接断开')
-    })
-
-    wsClient.on('progress', (data) => {
-      setTaskStatus({
-        trace_id: taskStatus?.trace_id || '',
-        stage: data.stage as any,
-        progress: data.progress,
-        completed: data.completed,
-        total: data.total,
-        current_task: data.current_task
-      })
-    })
-
-    wsClient.on('task_start', (data) => {
-      message.info(`开始处理任务: ${data.task.image} + ${data.task.audio}`)
-    })
-
-    wsClient.on('task_complete', (data) => {
-      message.success(`任务完成: ${data.task.image} + ${data.task.audio}`)
-    })
-
-    wsClient.on('batch_complete', (data) => {
-      setIsProcessing(false)
-      setTaskStatus(prev => prev ? { ...prev, stage: 'completed', progress: 1 } : null)
-      message.success(`批量处理完成！生成文件: ${data.final_videos.join(', ')}`)
-      // 刷新任务列表
-      loadAllTasks()
-    })
-
-    wsClient.on('error', (data) => {
-      setIsProcessing(false)
-      setTaskStatus(prev => prev ? { ...prev, stage: 'failed', error: data.message } : null)
-      message.error(`处理错误: ${data.message}`)
-    })
-
-    return () => {
-      wsClient.disconnect()
-    }
-  }, [wsClient, taskStatus?.trace_id, loadAllTasks])
-
   // 加载所有任务
   useEffect(() => {
     loadAllTasks()
@@ -126,14 +72,6 @@ const App: React.FC = () => {
     }
 
     setIsProcessing(true)
-    setTaskStatus({
-      trace_id: '',
-      stage: 'pending',
-      progress: 0,
-      completed: 0,
-      total: 0
-    })
-
     try {
       const response = await fetch('/api/batch/submit', {
         method: 'POST',
@@ -152,20 +90,14 @@ const App: React.FC = () => {
       }
 
       const result = await response.json()
-      setTaskStatus(prev => prev ? { ...prev, trace_id: result.trace_id } : null)
-
-      // 连接 WebSocket - 异步执行，不阻塞UI
-      setTimeout(() => {
-        wsClient.connect(result.trace_id)
-      }, 100)
-
-      message.success('任务已提交，开始处理...')
+      message.success('任务已提交，可在右侧任务列表中点击“刷新”查看最新进度')
+      await loadAllTasks()
     } catch (error) {
-      setIsProcessing(false)
-      setTaskStatus(null)
       message.error(`提交任务失败: ${error}`)
+    } finally {
+      setIsProcessing(false)
     }
-  }, [selectedImages, selectedAudios, config, wsClient])
+  }, [selectedImages, selectedAudios, config, loadAllTasks])
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
@@ -282,12 +214,6 @@ const App: React.FC = () => {
               tasks={allTasks}
               onRefresh={loadAllTasks}
               loading={isLoadingTasks}
-              onTaskDelete={(traceId) => {
-                // 如果删除的是当前正在显示的任务，清除任务状态
-                if (taskStatus?.trace_id === traceId) {
-                  setTaskStatus(null)
-                }
-              }}
             />
           </Col>
         </Row>

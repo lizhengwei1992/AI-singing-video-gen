@@ -1,28 +1,3 @@
-// WebSocket 事件类型
-export interface WebSocketEvents {
-  // 连接事件
-  'connection': { trace_id: string }
-  'disconnect': { reason: string }
-
-  // 进度事件
-  'progress': {
-    stage: string
-    progress: number
-    current_task?: TaskInfo
-    completed: number
-    total: number
-  }
-
-  // 任务事件
-  'task_start': { task: TaskInfo }
-  'task_complete': { task: TaskInfo, files: string[] }
-  'task_failed': { task: TaskInfo, error: string }
-
-  // 系统事件
-  'batch_complete': { final_videos: string[] }
-  'error': { message: string, code: string }
-}
-
 export interface TaskInfo {
   audio: string
   image: string

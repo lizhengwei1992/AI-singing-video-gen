@@ -9,11 +9,10 @@ from fastapi.responses import JSONResponse, FileResponse
 import aiofiles
 
 from app.models.schemas import BatchSubmitRequest, BatchSubmitResponse
-from app.services.task_manager import TaskManager
+from app.services.task_manager_instance import task_manager
 from config import Config
 
 router = APIRouter()
-task_manager = TaskManager()
 
 # 文件上传锁机制 - 防止重复上传相同文件
 file_upload_locks = {}

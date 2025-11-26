@@ -2,12 +2,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 import json
 from typing import Dict
 
-from app.services.task_manager import TaskManager
+from app.services.task_manager_instance import task_manager
 
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-        self.task_manager = TaskManager()
+        self.task_manager = task_manager
 
     async def connect(self, websocket: WebSocket, trace_id: str):
         await websocket.accept()

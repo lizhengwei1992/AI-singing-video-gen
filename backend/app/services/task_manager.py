@@ -1,15 +1,16 @@
 import asyncio
 import json
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable, Any
 from pathlib import Path
 import aiofiles
 from datetime import datetime
 from fastapi import WebSocket
 import subprocess
-import time
 import requests
 import websocket
+import functools
+import shutil
 
 from app.models.schemas import (
     TaskStage, TaskInfo, TaskConfig, TaskStatus, TaskLog,
@@ -27,24 +28,36 @@ class TaskManager:
         self.comfyui_client = ComfyUIClient()
         self.audio_processor = AudioProcessor()
 
+    async def _run_blocking(self, func: Callable[..., Any], *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
     async def _ensure_comfyui_ready(self, trace_id: str) -> bool:
         """确保ComfyUI服务就绪"""
         try:
             # 检查HTTP服务
-            response = requests.get(f"http://127.0.0.1:8090/system_stats", timeout=10)
+            response = await self._run_blocking(
+                requests.get,
+                f"http://127.0.0.1:8090/system_stats",
+                timeout=10
+            )
             if response.status_code != 200:
                 return False
 
             # 检查WebSocket服务
             try:
-                test_ws = websocket.WebSocket()
-                test_ws.connect(f"ws://127.0.0.1:8090/ws?clientId=readiness_check", timeout=10)
-                test_ws.close()
+                await self._run_blocking(self._test_ws_connection, "readiness_check")
                 return True
             except Exception:
                 return False
         except Exception:
             return False
+
+    def _test_ws_connection(self, client_id: str):
+        """同步检查ComfyUI WebSocket连接"""
+        test_ws = websocket.WebSocket()
+        test_ws.connect(f"ws://127.0.0.1:8090/ws?clientId={client_id}", timeout=10)
+        test_ws.close()
 
     async def _restart_comfyui(self, trace_id: str):
         """重启ComfyUI服务，确保完全启动后再返回"""
@@ -54,12 +67,17 @@ class TaskManager:
             # 查找并kill ComfyUI进程
             try:
                 # 查找运行在8090端口的进程
-                result = subprocess.run(['lsof', '-ti', ':8090'], capture_output=True, text=True)
+                result = await self._run_blocking(
+                    subprocess.run,
+                    ['lsof', '-ti', ':8090'],
+                    capture_output=True,
+                    text=True
+                )
                 if result.stdout.strip():
                     pid = result.stdout.strip()
-                    subprocess.run(['kill', '-9', pid], check=True)
+                    await self._run_blocking(subprocess.run, ['kill', '-9', pid], check=True)
                     await self._add_log(trace_id, f"已终止ComfyUI进程: PID {pid}", "info")
-                    time.sleep(3)  # 等待进程完全终止
+                    await asyncio.sleep(3)  # 等待进程完全终止
             except subprocess.CalledProcessError:
                 await self._add_log(trace_id, "未找到ComfyUI进程或终止失败", "warn")
 
@@ -68,7 +86,7 @@ class TaskManager:
 
             # 使用tmux在第一个窗口启动ComfyUI (窗口1)
             cmd = f"tmux send-keys -t gen_video:1 'cd /home/lzw/project/ComfyUI && python main.py --port 8090 --listen' C-m"
-            subprocess.run(cmd, shell=True, check=True)
+            await self._run_blocking(subprocess.run, cmd, shell=True, check=True)
 
             await self._add_log(trace_id, "ComfyUI启动命令已发送，等待服务启动...", "info")
 
@@ -77,15 +95,17 @@ class TaskManager:
             for i in range(max_retries):
                 try:
                     # 第一步：检查端口是否响应
-                    response = requests.get(f"http://127.0.0.1:8090/system_stats", timeout=10)
+                    response = await self._run_blocking(
+                        requests.get,
+                        f"http://127.0.0.1:8090/system_stats",
+                        timeout=10
+                    )
                     if response.status_code == 200:
                         await self._add_log(trace_id, f"ComfyUI HTTP服务响应正常 (尝试 {i+1})", "info")
 
                         # 第二步：检查WebSocket连接是否正常
                         try:
-                            test_ws = websocket.WebSocket()
-                            test_ws.connect(f"ws://127.0.0.1:8090/ws?clientId=test_{i}", timeout=10)
-                            test_ws.close()
+                            await self._run_blocking(self._test_ws_connection, f"test_{i}")
                             await self._add_log(trace_id, "ComfyUI WebSocket服务正常", "info")
 
                             # 第三步：等待额外时间确保服务完全就绪
@@ -283,16 +303,6 @@ class TaskManager:
 
             await self._add_log(trace_id, "开始视频生成阶段", "info")
 
-            # 在第一个任务开始前，确保ComfyUI完全启动
-            if len(task_mappings) > 0:
-                await self._add_log(trace_id, "检查ComfyUI服务状态...", "info")
-                comfyui_ready = await self._ensure_comfyui_ready(trace_id)
-                if not comfyui_ready:
-                    await self._add_log(trace_id, "ComfyUI服务未就绪，尝试重启...", "warn")
-                    restart_success = await self._restart_comfyui(trace_id)
-                    if not restart_success:
-                        raise Exception("ComfyUI服务无法启动，无法继续执行任务")
-
             for task_index, mapping in enumerate(task_mappings):
                 # 从映射中提取信息
                 sub_task_key = list(mapping.keys())[0]
@@ -312,6 +322,12 @@ class TaskManager:
                 )
 
                 try:
+                    # 视频生成前强制重启ComfyUI，避免显存残留
+                    await self._add_log(trace_id, f"重启ComfyUI以处理子任务 {task_index + 1}", "info")
+                    restart_success = await self._restart_comfyui(trace_id)
+                    if not restart_success:
+                        raise Exception("ComfyUI服务无法重启用于视频生成")
+
                     # 执行视频生成
                     await self._add_log(trace_id, f"调用ComfyUI生成视频: 图片={Path(image_path).name}, 音频={Path(segment_path).name}", "info", {
                         "image_path": image_path,
@@ -374,16 +390,7 @@ class TaskManager:
                         ))
                     )
 
-                    # 只有在当前任务完全完成后，才考虑重启ComfyUI（除了最后一个任务）
-                    if task_index < len(task_mappings) - 1:
-                        await self._add_log(trace_id, f"任务 {task_index + 1} 完成，等待重启ComfyUI以清除显存...", "info")
-                        # 给ComfyUI一点时间来完成清理
-                        await asyncio.sleep(2)
-                        restart_success = await self._restart_comfyui(trace_id)
-                        if not restart_success:
-                            await self._add_log(trace_id, "ComfyUI重启失败，继续执行但可能影响性能", "warn")
-                    else:
-                        await self._add_log(trace_id, "所有任务完成，无需重启ComfyUI", "info")
+                    await self._add_log(trace_id, f"子任务 {task_index + 1} 完成，等待下一个任务...", "info")
 
                 except Exception as e:
                     await self._add_log(trace_id, f"视频生成失败: {str(e)}", "error", {
@@ -459,8 +466,83 @@ class TaskManager:
 
             await self._add_log(trace_id, f"不带音频视频合并完成: {Path(final_video_no_audio).name}", "info")
 
+            # 4. 视频超分阶段
+            await self._add_log(trace_id, "开始视频超分阶段（15秒切片）", "info")
+
+            sr_segment_duration = 15
+            sr_segments = await self.audio_processor.split_video(
+                final_video_no_audio,
+                segment_duration=sr_segment_duration,
+                output_prefix=f"{config.outputPrefix}_sr_segment"
+            )
+
+            await self._add_log(trace_id, f"视频切片完成，共 {len(sr_segments)} 个片段", "info")
+
+            sr_chunk_files: List[str] = []
+
+            for idx, segment_path in enumerate(sr_segments):
+                segment_name = Path(segment_path).name
+                sr_input_path = Path(Config.COMFYUI_INPUT) / segment_name
+
+                try:
+                    if sr_input_path.exists():
+                        sr_input_path.unlink()
+                    shutil.copy2(segment_path, sr_input_path)
+                except Exception as copy_error:
+                    raise Exception(f"准备超分片段 {segment_name} 失败: {copy_error}") from copy_error
+
+                await self._add_log(trace_id, f"重启ComfyUI执行超分片段 {idx + 1}/{len(sr_segments)}", "info")
+                restart_success = await self._restart_comfyui(trace_id)
+                if not restart_success:
+                    raise Exception("ComfyUI服务无法为超分片段重启")
+
+                sr_output_prefix = f"{Path(segment_name).stem}_sr"
+                sr_outputs = await self.comfyui_client.execute_video_super_resolution(
+                    input_filename=sr_input_path.name,
+                    output_prefix=sr_output_prefix
+                )
+
+                sr_chunk_path = Path(Config.COMFYUI_OUTPUT) / f"{sr_output_prefix}_00001.mp4"
+                if not sr_chunk_path.exists():
+                    raise FileNotFoundError(f"未找到超分输出文件: {sr_chunk_path}")
+
+                sr_chunk_files.append(str(sr_chunk_path))
+                await self._add_log(trace_id, f"超分片段完成: {sr_chunk_path.name}", "info", {
+                    "sr_outputs": sr_outputs
+                })
+
+                # 删除输入副本
+                try:
+                    if sr_input_path.exists():
+                        sr_input_path.unlink()
+                except Exception as cleanup_error:
+                    await self._add_log(
+                        trace_id,
+                        f"删除超分输入临时文件失败: {sr_input_path}",
+                        "warn",
+                        {"error": str(cleanup_error)}
+                    )
+
+                # 更新进度，超分阶段占用 0.15 进度
+                sr_progress = 0.8 + ((idx + 1) / len(sr_segments)) * 0.15
+                await self._update_task_status(
+                    trace_id,
+                    progress=min(sr_progress, 0.95)
+                )
+
+            final_video_no_audio_sr = str(final_output_dir / f"{config.outputPrefix}_sr.mp4")
+            await self._add_log(trace_id, f"开始合并超分视频: {Path(final_video_no_audio_sr).name}", "info")
+
+            await self.audio_processor.combine_videos(
+                sr_chunk_files,
+                final_video_no_audio_sr,
+                include_audio=False
+            )
+
+            await self._add_log(trace_id, f"超分视频合并完成: {Path(final_video_no_audio_sr).name}", "info")
+
             # 清理子任务输出文件
-            cleanup_files = set(video_chunks_with_audio + video_chunks_without_audio + preview_frames)
+            cleanup_files = set(video_chunks_with_audio + video_chunks_without_audio + preview_frames + sr_chunk_files + sr_segments)
             deleted_files = []
             for file_path in cleanup_files:
                 path_obj = Path(file_path)
@@ -492,7 +574,8 @@ class TaskManager:
             await self._add_log(trace_id, "任务执行完成", "info", {
                 "final_videos": [
                     str(Path(final_video_with_audio).name),
-                    str(Path(final_video_no_audio).name)
+                    str(Path(final_video_no_audio).name),
+                    str(Path(final_video_no_audio_sr).name)
                 ]
             })
 
@@ -501,7 +584,7 @@ class TaskManager:
                 trace_id,
                 "batch_complete",
                 self._serialize_event(BatchCompleteEvent(
-                    final_videos=[final_video_with_audio, final_video_no_audio]
+                    final_videos=[final_video_with_audio, final_video_no_audio, final_video_no_audio_sr]
                 ))
             )
 

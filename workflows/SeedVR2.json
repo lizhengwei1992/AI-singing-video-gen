@@ -1,141 +1,157 @@
 {
-    "10": {
-      "inputs": {
-        "seed": 42,
-        "resolution": 1080,
-        "max_resolution": 0,
-        "batch_size": 33,
-        "uniform_batch_size": true,
-        "color_correction": "lab",
-        "temporal_overlap": 3,
-        "prepend_frames": 0,
-        "input_noise_scale": 0,
-        "latent_noise_scale": 0,
-        "offload_device": "cpu",
-        "enable_debug": false,
-        "image": [
-          "22",
-          0
-        ],
-        "dit": [
-          "14",
-          0
-        ],
-        "vae": [
-          "13",
-          0
-        ]
-      },
-      "class_type": "SeedVR2VideoUpscaler",
-      "_meta": {
-        "title": "SeedVR2 Video Upscaler (v2.5.10)"
-      }
+  "10": {
+    "inputs": {
+      "seed": 42,
+      "resolution": 1080,
+      "max_resolution": 0,
+      "batch_size": 33,
+      "uniform_batch_size": true,
+      "color_correction": "lab",
+      "temporal_overlap": 3,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "22",
+        0
+      ],
+      "dit": [
+        "14",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
     },
-    "13": {
-      "inputs": {
-        "model": "ema_vae_fp16.safetensors",
-        "device": "cuda:0",
-        "encode_tiled": true,
-        "encode_tile_size": 1024,
-        "encode_tile_overlap": 128,
-        "decode_tiled": true,
-        "decode_tile_size": 768,
-        "decode_tile_overlap": 128,
-        "tile_debug": "false",
-        "offload_device": "cpu",
-        "cache_model": false,
-        "torch_compile_args": [
-          "19",
-          0
-        ]
-      },
-      "class_type": "SeedVR2LoadVAEModel",
-      "_meta": {
-        "title": "SeedVR2 (Down)Load VAE Model"
-      }
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "SeedVR2 Video Upscaler (v2.5.10)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 768,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false,
+      "torch_compile_args": [
+        "19",
+        0
+      ]
     },
-    "14": {
-      "inputs": {
-        "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
-        "device": "cuda:0",
-        "blocks_to_swap": 32,
-        "swap_io_components": false,
-        "offload_device": "cpu",
-        "cache_model": false,
-        "attention_mode": "sdpa",
-        "torch_compile_args": [
-          "19",
-          0
-        ]
-      },
-      "class_type": "SeedVR2LoadDiTModel",
-      "_meta": {
-        "title": "SeedVR2 (Down)Load DiT Model"
-      }
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load VAE Model"
+    }
+  },
+  "14": {
+    "inputs": {
+      "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+      "device": "cuda:0",
+      "blocks_to_swap": 32,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "cache_model": false,
+      "attention_mode": "flash_attn",
+      "torch_compile_args": [
+        "19",
+        0
+      ]
     },
-    "19": {
-      "inputs": {
-        "backend": "inductor",
-        "mode": "default",
-        "fullgraph": false,
-        "dynamic": false,
-        "dynamo_cache_size_limit": 64,
-        "dynamo_recompile_limit": 128
-      },
-      "class_type": "SeedVR2TorchCompileSettings",
-      "_meta": {
-        "title": "SeedVR2 Torch Compile Settings"
-      }
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load DiT Model"
+    }
+  },
+  "19": {
+    "inputs": {
+      "backend": "inductor",
+      "mode": "default",
+      "fullgraph": false,
+      "dynamic": false,
+      "dynamo_cache_size_limit": 64,
+      "dynamo_recompile_limit": 128
     },
-    "21": {
-      "inputs": {
-        "file": "test_00001-audio.mp4",
-        "video-preview": ""
-      },
-      "class_type": "LoadVideo",
-      "_meta": {
-        "title": "加载视频"
-      }
+    "class_type": "SeedVR2TorchCompileSettings",
+    "_meta": {
+      "title": "SeedVR2 Torch Compile Settings"
+    }
+  },
+  "21": {
+    "inputs": {
+      "file": "0x01_000_00001.mp4",
+      "video-preview": ""
     },
-    "22": {
-      "inputs": {
-        "video": [
-          "21",
-          0
-        ]
-      },
-      "class_type": "GetVideoComponents",
-      "_meta": {
-        "title": "获取视频组件"
-      }
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "加载视频"
+    }
+  },
+  "22": {
+    "inputs": {
+      "video": [
+        "21",
+        0
+      ]
     },
-    "25": {
-      "inputs": {
-        "frame_rate": [
-          "22",
-          2
-        ],
-        "loop_count": 0,
-        "filename_prefix": "test_sr",
-        "format": "video/h264-mp4",
-        "pix_fmt": "yuv420p",
-        "crf": 19,
-        "save_metadata": true,
-        "trim_to_audio": false,
-        "pingpong": false,
-        "save_output": true,
-        "images": [
-          "10",
-          0
-        ],
-        "audio": [
-          "22",
-          1
-        ]
-      },
-      "class_type": "VHS_VideoCombine",
-      "_meta": {
-        "title": "Video Combine 🎥🅥🅗🅢"
-      }
+    "class_type": "GetVideoComponents",
+    "_meta": {
+      "title": "获取视频组件"
+    }
+  },
+  "25": {
+    "inputs": {
+      "frame_rate": [
+        "22",
+        2
+      ],
+      "loop_count": 0,
+      "filename_prefix": "test_sr",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "27": {
+    "inputs": {
+      "width": 1920,
+      "height": 1080,
+      "upscale_method": "lanczos",
+      "keep_proportion": "pad",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu",
+      "image": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
     }
   }
+}

@@ -147,3 +147,46 @@ class AudioProcessor:
         os.remove(list_file)
 
         return output_path
+
+    @staticmethod
+    async def split_video(
+        video_path: str,
+        segment_duration: int = 15,
+        output_prefix: str = "video_segment"
+    ) -> List[str]:
+        """
+        使用 FFmpeg 将视频按指定时长切片
+        """
+        output_dir = f"{Config.COMFYUI_INPUT}/temp_video_segments"
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        unique_prefix = f"{output_prefix}_{uuid.uuid4().hex[:8]}"
+        output_pattern = f"{output_dir}/{unique_prefix}_%03d.mp4"
+
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-c', 'copy',
+            '-map', '0',
+            '-f', 'segment',
+            '-segment_time', str(segment_duration),
+            '-reset_timestamps', '1',
+            output_pattern
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            raise Exception(f"视频分割失败: {stderr.decode()}")
+
+        segment_files = sorted(str(p) for p in Path(output_dir).glob(f"{unique_prefix}_*.mp4"))
+        if not segment_files:
+            raise Exception("视频分割未生成任何片段")
+
+        return segment_files

@@ -8,6 +8,8 @@ import re
 from typing import Dict, Any, List
 import asyncio
 import aiofiles
+import time
+from pathlib import Path
 
 from config import Config
 
@@ -48,11 +50,14 @@ class ComfyUIClient:
         with urllib.request.urlopen(f"http://{self.server_address}/view?{url_values}") as response:
             return response.read()
 
-    async def execute_workflow(self, workflow: Dict[str, Any], timeout: int = 1200) -> Dict[str, Any]:
+    async def execute_workflow(self, workflow: Dict[str, Any], timeout: int = 900) -> Dict[str, Any]:
         """
         执行工作流并等待完成
         当收到 executing 消息中 node 为 None 时，表示执行完成
         """
+        return await asyncio.to_thread(self._execute_workflow_sync, workflow, timeout)
+
+    def _execute_workflow_sync(self, workflow: Dict[str, Any], timeout: int) -> Dict[str, Any]:
         prompt_id = str(uuid.uuid4())
 
         # 提交提示
@@ -63,12 +68,12 @@ class ComfyUIClient:
         ws.connect(f"ws://{self.server_address}/ws?clientId={self.client_id}")
 
         output_files = {}
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         try:
             while True:
                 # 检查超时
-                if asyncio.get_event_loop().time() - start_time > timeout:
+                if time.monotonic() - start_time > timeout:
                     raise TimeoutError(f"工作流执行超时 ({timeout/60}分钟)")
 
                 out = ws.recv()
@@ -164,3 +169,34 @@ class ComfyUIClient:
                 output_files.append(image['filename'])
 
         return output_files
+
+    async def execute_video_super_resolution(
+        self,
+        input_filename: str,
+        output_prefix: str
+    ) -> List[str]:
+        """
+        使用 SeedVR2 工作流对视频进行超分处理
+        :param input_filename: 已放置到 ComfyUI input 目录的视频文件名
+        :param output_prefix: 输出文件前缀（会在原文件名后添加 _sr）
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/SeedVR2.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置输入视频文件名（ComfyUI 相对 input 目录）
+        workflow["21"]["inputs"]["file"] = input_filename
+
+        # 设置输出前缀为原始文件名 + _sr
+        workflow["25"]["inputs"]["filename_prefix"] = output_prefix
+
+        await self.execute_workflow(workflow)
+
+        # SeedVR2 工作流固定输出单个 mp4 文件，验证其存在性
+        expected_video = Path(Config.COMFYUI_OUTPUT) / f"{output_prefix}_00001.mp4"
+        if not expected_video.exists():
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到超分结果: {expected_video}")
+
+        return [str(expected_video)]
