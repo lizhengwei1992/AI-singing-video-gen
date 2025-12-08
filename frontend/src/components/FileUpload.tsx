@@ -83,7 +83,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const newFile: UploadFile = {
         id: fileId,
         name: file.name,
-        type: accept.includes('image') ? 'image' : 'audio',
+        type: accept.includes('image')
+          ? 'image'
+          : accept.includes('audio')
+          ? 'audio'
+          : 'video',
         size: file.size,
         url: result.file_path,
         preview: accept.includes('image') ? URL.createObjectURL(file) : undefined

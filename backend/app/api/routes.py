@@ -8,7 +8,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 import aiofiles
 
-from app.models.schemas import BatchSubmitRequest, BatchSubmitResponse
+from app.models.schemas import BatchSubmitRequest, BatchSubmitResponse, TaskMode
 from app.services.task_manager_instance import task_manager
 from config import Config
 
@@ -36,6 +36,13 @@ async def upload_file(file: UploadFile = File(...)):
                 detail=f"不支持的音频格式: {file.content_type}"
             )
         upload_dir = f"{Config.COMFYUI_INPUT}/uploaded_audios"
+    elif file.content_type.startswith('video/'):
+        if file.content_type not in Config.ALLOWED_VIDEO_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的视频格式: {file.content_type}"
+            )
+        upload_dir = f"{Config.COMFYUI_INPUT}/uploaded_videos"
     else:
         raise HTTPException(
             status_code=400,
@@ -159,19 +166,47 @@ async def upload_file(file: UploadFile = File(...)):
 async def submit_batch_task(request: BatchSubmitRequest):
     """提交批量处理任务"""
     try:
-        # 验证文件存在
-        for image_path in request.images:
-            if not os.path.exists(image_path):
+        mode = request.config.mode
+
+        # 生成+超分模式：必须提供图片和音频
+        if mode == TaskMode.GENERATE_AND_UPSCALE:
+            if not request.images:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"图片文件不存在: {image_path}"
+                    detail="生成模式下必须至少提供一张图片"
+                )
+            if not request.audios:
+                raise HTTPException(
+                    status_code=400,
+                    detail="生成模式下必须至少提供一个音频"
                 )
 
-        for audio_path in request.audios:
-            if not os.path.exists(audio_path):
+            # 验证文件存在
+            for image_path in request.images:
+                if not os.path.exists(image_path):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"图片文件不存在: {image_path}"
+                    )
+
+            for audio_path in request.audios:
+                if not os.path.exists(audio_path):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"音频文件不存在: {audio_path}"
+                    )
+
+        # 仅超分模式：只校验输入视频
+        elif mode == TaskMode.UPSCALE_ONLY:
+            if not request.config.srInputVideo:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"音频文件不存在: {audio_path}"
+                    detail="仅超分模式下必须提供 srInputVideo"
+                )
+            if not os.path.exists(request.config.srInputVideo):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"输入视频文件不存在: {request.config.srInputVideo}"
                 )
 
         # 创建任务
@@ -299,10 +334,30 @@ async def get_audios():
     audios.sort(key=lambda x: x["modified"], reverse=True)
     return {"audios": audios}
 
+
+@router.get("/files/videos")
+async def get_videos():
+    """获取所有上传的视频文件（用于仅超分模式）"""
+    videos_dir = Path(f"{Config.COMFYUI_INPUT}/uploaded_videos")
+    videos = []
+
+    if videos_dir.exists():
+        for file_path in videos_dir.glob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in ['.mp4', '.mkv', '.mov']:
+                videos.append({
+                    "filename": file_path.name,
+                    "path": str(file_path),
+                    "size": file_path.stat().st_size,
+                    "modified": file_path.stat().st_mtime
+                })
+
+    videos.sort(key=lambda x: x["modified"], reverse=True)
+    return {"videos": videos}
+
 @router.delete("/files/{file_type}/{filename}")
 async def delete_file(file_type: str, filename: str):
     """删除文件"""
-    if file_type not in ["images", "audios"]:
+    if file_type not in ["images", "audios", "videos"]:
         raise HTTPException(status_code=400, detail="无效的文件类型")
 
     if ".." in filename or "/" in filename or "\\" in filename:
@@ -326,7 +381,7 @@ async def delete_file(file_type: str, filename: str):
 @router.get("/files/{file_type}/{filename}")
 async def get_file(file_type: str, filename: str):
     """获取文件（用于图片预览）"""
-    if file_type not in ["images", "audios"]:
+    if file_type not in ["images", "audios", "videos"]:
         raise HTTPException(status_code=400, detail="无效的文件类型")
 
     if ".." in filename or "/" in filename or "\\" in filename:
@@ -339,3 +394,24 @@ async def get_file(file_type: str, filename: str):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     return FileResponse(file_path)
+
+
+@router.get("/videos/{output_prefix}/{filename}")
+async def download_video(output_prefix: str, filename: str):
+    """下载最终生成/超分后的视频文件"""
+    if ".." in output_prefix or "/" in output_prefix or "\\" in output_prefix:
+        raise HTTPException(status_code=400, detail="无效的输出前缀")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+
+    video_dir = Path(Config.VIDEO_OUTPUT_DIR) / output_prefix
+    file_path = video_dir / filename
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+
+    return FileResponse(
+        file_path,
+        media_type="video/mp4",
+        filename=filename
+    )

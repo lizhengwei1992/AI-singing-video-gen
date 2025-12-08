@@ -13,7 +13,7 @@ import functools
 import shutil
 
 from app.models.schemas import (
-    TaskStage, TaskInfo, TaskConfig, TaskStatus, TaskLog,
+    TaskStage, TaskMode, TaskInfo, TaskConfig, TaskStatus, TaskLog,
     ProgressEvent, TaskStartEvent, TaskCompleteEvent,
     TaskFailedEvent, BatchCompleteEvent, ErrorEvent
 )
@@ -159,6 +159,10 @@ class TaskManager:
         """创建新任务"""
         trace_id = str(uuid.uuid4())
 
+        # 兼容：如果前端未单独传 audio/video 分割时长，则从旧字段 segmentDuration 补充
+        audio_seg = getattr(config, "audioSegmentDuration", None) or getattr(config, "segmentDuration", 30)
+        video_seg = getattr(config, "videoSegmentDuration", None) or 10
+
         task_status = TaskStatus(
             trace_id=trace_id,
             stage=TaskStage.PENDING,
@@ -168,9 +172,13 @@ class TaskManager:
             # 保存ComfyUI生成参数信息
             input_images=images,
             input_audios=audios,
-            segment_duration=config.segmentDuration,
+            segment_duration=audio_seg,
+            audio_segment_duration=audio_seg,
+            video_segment_duration=video_seg,
             output_prefix=config.outputPrefix,
-            prompt=config.prompt
+            prompt=config.prompt,
+            mode=getattr(config, "mode", None),
+            input_videos=[config.srInputVideo] if getattr(config, "srInputVideo", None) else None
         )
 
         self.active_tasks[trace_id] = task_status
@@ -193,13 +201,27 @@ class TaskManager:
     ):
         """执行任务的主要流程"""
         try:
+            mode = getattr(config, "mode", TaskMode.GENERATE_AND_UPSCALE)
+
+            # 解析音频/视频分割时长
+            audio_seg = getattr(config, "audioSegmentDuration", None) or getattr(config, "segmentDuration", 30)
+            video_seg = getattr(config, "videoSegmentDuration", None) or 10
+
             # 添加任务开始日志
             await self._add_log(trace_id, "任务开始执行", "info", {
+                "mode": mode.value if isinstance(mode, TaskMode) else str(mode),
                 "images": len(images),
                 "audios": len(audios),
-                "segment_duration": config.segmentDuration,
-                "output_prefix": config.outputPrefix
+                "audio_segment_duration": audio_seg,
+                "video_segment_duration": video_seg,
+                "output_prefix": config.outputPrefix,
+                "sr_input_video": getattr(config, "srInputVideo", None)
             })
+
+            # 仅超分模式：直接走视频超分流程，跳过音频分割和视频生成
+            if mode == TaskMode.UPSCALE_ONLY:
+                await self._execute_upscale_only_task(trace_id, config)
+                return
 
             # 1. 音频分割阶段
             await self._update_task_status(
@@ -233,7 +255,7 @@ class TaskManager:
 
                 segments = await self.audio_processor.split_audio(
                     audio_path,
-                    config.segmentDuration,
+                    audio_seg,
                     f"audio_{i}"
                 )
                 all_segments.extend(segments)
@@ -466,10 +488,10 @@ class TaskManager:
 
             await self._add_log(trace_id, f"不带音频视频合并完成: {Path(final_video_no_audio).name}", "info")
 
-            # 4. 视频超分阶段
-            await self._add_log(trace_id, "开始视频超分阶段（15秒切片）", "info")
+            # 4. 视频超分阶段（使用视频分割时长）
+            await self._add_log(trace_id, f"开始视频超分阶段（{video_seg}秒切片）", "info")
 
-            sr_segment_duration = 15
+            sr_segment_duration = video_seg
             sr_segments = await self.audio_processor.split_video(
                 final_video_no_audio,
                 segment_duration=sr_segment_duration,
@@ -726,3 +748,168 @@ class TaskManager:
         status_file = f"{Config.TASK_STATUS}/{trace_id}.json"
         if Path(status_file).exists():
             Path(status_file).unlink()
+
+    async def _execute_upscale_only_task(
+        self,
+        trace_id: str,
+        config: TaskConfig
+    ):
+        """
+        仅超分模式：
+        - 使用已有视频（srInputVideo）
+        - 按 15s 切片
+        - 对每个片段重启 ComfyUI 并执行 SeedVR2 超分
+        - 再将所有超分片段合并为最终视频
+        """
+        sr_input_video = getattr(config, "srInputVideo", None)
+        if not sr_input_video:
+            raise Exception("仅超分模式下 srInputVideo 不能为空")
+
+        input_path = Path(sr_input_video)
+        if not input_path.exists():
+            raise FileNotFoundError(f"输入视频不存在: {sr_input_video}")
+
+        await self._update_task_status(
+            trace_id,
+            stage=TaskStage.PROCESSING,
+            progress=0.05,
+            total=0,
+            completed=0
+        )
+
+        await self._add_log(trace_id, "仅超分模式：开始处理输入视频", "info", {
+            "sr_input_video": sr_input_video
+        })
+
+        # 1. 切片阶段（使用前端传入的分割时长，默认为15秒）
+        sr_segment_duration = getattr(config, "segmentDuration", 15) or 15
+        segments = await self.audio_processor.split_video(
+            str(input_path),
+            segment_duration=sr_segment_duration,
+            output_prefix=f"{config.outputPrefix}_sr_only_segment"
+        )
+
+        total_segments = len(segments)
+        if total_segments == 0:
+            raise Exception("视频切片后没有生成任何片段")
+
+        await self._add_log(trace_id, f"仅超分模式：视频切片完成，共 {total_segments} 个片段", "info")
+
+        await self._update_task_status(
+            trace_id,
+            stage=TaskStage.PROCESSING,
+            progress=0.15,
+            total=total_segments,
+            completed=0
+        )
+
+        # 2. 对每个片段执行超分
+        sr_chunk_files: List[str] = []
+
+        for idx, segment_path in enumerate(segments):
+            segment_name = Path(segment_path).name
+            sr_input_path = Path(Config.COMFYUI_INPUT) / segment_name
+
+            try:
+                if sr_input_path.exists():
+                    sr_input_path.unlink()
+                shutil.copy2(segment_path, sr_input_path)
+            except Exception as copy_error:
+                raise Exception(f"准备超分片段 {segment_name} 失败: {copy_error}") from copy_error
+
+            await self._add_log(trace_id, f"仅超分模式：重启ComfyUI执行超分片段 {idx + 1}/{total_segments}", "info")
+            restart_success = await self._restart_comfyui(trace_id)
+            if not restart_success:
+                raise Exception("ComfyUI服务无法为超分片段重启")
+
+            sr_output_prefix = f"{Path(segment_name).stem}_sr"
+            sr_outputs = await self.comfyui_client.execute_video_super_resolution(
+                input_filename=sr_input_path.name,
+                output_prefix=sr_output_prefix
+            )
+
+            sr_chunk_path = Path(Config.COMFYUI_OUTPUT) / f"{sr_output_prefix}_00001.mp4"
+            if not sr_chunk_path.exists():
+                raise FileNotFoundError(f"未找到超分输出文件: {sr_chunk_path}")
+
+            sr_chunk_files.append(str(sr_chunk_path))
+            await self._add_log(trace_id, f"仅超分模式：超分片段完成: {sr_chunk_path.name}", "info", {
+                "sr_outputs": sr_outputs
+            })
+
+            # 删除输入副本
+            try:
+                if sr_input_path.exists():
+                    sr_input_path.unlink()
+            except Exception as cleanup_error:
+                await self._add_log(
+                    trace_id,
+                    f"仅超分模式：删除超分输入临时文件失败: {sr_input_path}",
+                    "warn",
+                    {"error": str(cleanup_error)}
+                )
+
+            # 更新进度
+            progress = 0.15 + ((idx + 1) / total_segments) * 0.75
+            await self._update_task_status(
+                trace_id,
+                progress=min(progress, 0.95),
+                completed=idx + 1
+            )
+
+        # 3. 合并超分片段
+        final_output_dir = Path(Config.VIDEO_OUTPUT_DIR) / (config.outputPrefix or input_path.stem)
+        final_output_dir.mkdir(parents=True, exist_ok=True)
+
+        final_video_no_audio_sr = str(final_output_dir / f"{config.outputPrefix or input_path.stem}_sr.mp4")
+        await self._add_log(trace_id, f"仅超分模式：开始合并超分视频: {Path(final_video_no_audio_sr).name}", "info")
+
+        await self.audio_processor.combine_videos(
+            sr_chunk_files,
+            final_video_no_audio_sr,
+            include_audio=False
+        )
+
+        await self._add_log(trace_id, f"仅超分模式：超分视频合并完成: {Path(final_video_no_audio_sr).name}", "info")
+
+        # 清理切片和中间结果
+        cleanup_files = set(segments + sr_chunk_files)
+        deleted_files = []
+        for file_path in cleanup_files:
+            path_obj = Path(file_path)
+            if path_obj.exists():
+                try:
+                    path_obj.unlink()
+                    deleted_files.append(path_obj.name)
+                except Exception as cleanup_error:
+                    await self._add_log(
+                        trace_id,
+                        f"仅超分模式：删除中间文件失败: {path_obj}",
+                        "warn",
+                        {"error": str(cleanup_error)}
+                    )
+
+        if deleted_files:
+            await self._add_log(trace_id, "仅超分模式：已清理中间文件", "info", {
+                "deleted_files": deleted_files
+            })
+
+        # 完成状态
+        await self._update_task_status(
+            trace_id,
+            stage=TaskStage.COMPLETED,
+            progress=1.0,
+            completed=total_segments
+        )
+
+        await self._add_log(trace_id, "仅超分模式：任务执行完成", "info", {
+            "final_videos": [str(Path(final_video_no_audio_sr).name)]
+        })
+
+        await self._send_websocket_message(
+            trace_id,
+            "batch_complete",
+            self._serialize_event(BatchCompleteEvent(
+                final_videos=[final_video_no_audio_sr]
+            ))
+        )

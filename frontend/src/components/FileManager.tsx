@@ -12,7 +12,7 @@ interface FileItem {
 }
 
 interface FileManagerProps {
-  fileType: 'images' | 'audios'
+  fileType: 'images' | 'audios' | 'videos'
   selectedFiles: string[]
   onSelectionChange: (files: string[]) => void
   onFilesChange?: (files: FileItem[]) => void
@@ -100,13 +100,17 @@ const FileManager: React.FC<FileManagerProps> = ({
   }, [fileType])
 
   const isImage = fileType === 'images'
+  const isAudio = fileType === 'audios'
+  const isVideo = fileType === 'videos'
 
   return (
     <Card
       title={
         <Space>
-          {isImage ? <PictureOutlined /> : <SoundOutlined />}
-          {isImage ? '图片文件' : '音频文件'}
+          {isImage && <PictureOutlined />}
+          {isAudio && !isImage && <SoundOutlined />}
+          {isVideo && !isImage && !isAudio && <SoundOutlined />}
+          {isImage ? '图片文件' : isAudio ? '音频文件' : '视频文件'}
         </Space>
       }
       extra={
@@ -122,7 +126,7 @@ const FileManager: React.FC<FileManagerProps> = ({
     >
       {files.length === 0 ? (
         <Empty
-          description={`暂无${isImage ? '图片' : '音频'}文件`}
+          description={`暂无${isImage ? '图片' : isAudio ? '音频' : '视频'}文件`}
           style={{ padding: '40px 0' }}
         />
       ) : (

@@ -7,17 +7,24 @@ export interface TaskInfo {
 export interface UploadFile {
   id: string
   name: string
-  type: 'image' | 'audio'
+  type: 'image' | 'audio' | 'video'
   size: number
   url?: string
   preview?: string
 }
 
 export interface TaskConfig {
-  segmentDuration: number
+  // 音频分割时长（生成模式）
+  audioSegmentDuration: number
+  // 视频分割时长（生成模式的视频超分 & 仅超分模式）
+  videoSegmentDuration: number
+  // 兼容旧字段
+  segmentDuration?: number
   outputPrefix: string
   prompt: string
   imageAudioMapping: Record<string, string>
+  mode: 'generate_and_upscale' | 'upscale_only'
+  srInputVideo?: string
 }
 
 export interface TaskStatus {
@@ -32,9 +39,11 @@ export interface TaskStatus {
   comfyui_params?: Record<string, any>
   input_images?: string[]
   input_audios?: string[]
+  input_videos?: string[]
   segment_duration?: number
   output_prefix?: string
   prompt?: string
+  mode?: 'generate_and_upscale' | 'upscale_only'
   // 新增：任务日志
   logs?: TaskLog[]
 }

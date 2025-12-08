@@ -29,6 +29,7 @@ class Config:
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
     ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/jpg"]
     ALLOWED_AUDIO_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav"]
+    ALLOWED_VIDEO_TYPES = ["video/mp4", "video/x-m4v", "video/quicktime"]
 
     # 任务配置
     MAX_RETRY_COUNT = 3
@@ -42,7 +43,8 @@ class Config:
             cls.TEMP_FILES,
             f"{cls.COMFYUI_INPUT}/uploaded_images",
             f"{cls.COMFYUI_INPUT}/uploaded_audios",
-            f"{cls.COMFYUI_INPUT}/temp_segments",
+            f"{cls.COMFYUI_INPUT}/uploaded_videos",
+            f"{cls.COMFYUI_INPUT}/temp_audio_segments",
             cls.VIDEO_OUTPUT_DIR
         ]
 

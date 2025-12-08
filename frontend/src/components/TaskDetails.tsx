@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Card, Collapse, Typography, Space, Tag, Button, Empty, message, Popconfirm } from 'antd'
-import { ReloadOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined } from '@ant-design/icons'
+import { ReloadOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons'
 
 const { Text, Title } = Typography
 const { Panel } = Collapse
@@ -22,10 +22,12 @@ interface TaskStatus {
   error?: string
   input_images?: string[]
   input_audios?: string[]
+  input_videos?: string[]
   segment_duration?: number
   output_prefix?: string
   prompt?: string
   current_task?: any
+  mode?: 'generate_and_upscale' | 'upscale_only'
 }
 
 interface TaskDetailsProps {
@@ -179,6 +181,13 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
                 </div>
 
                 {/* 输入文件 */}
+                {task.mode && (
+                  <div>
+                    <Text strong>任务模式: </Text>
+                    <Text code>{task.mode === 'upscale_only' ? '仅超分' : '生成 + 超分'}</Text>
+                  </div>
+                )}
+
                 {task.input_images && task.input_images.length > 0 && (
                   <div>
                     <Text strong>输入图片: </Text>
@@ -209,11 +218,33 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
                   </div>
                 )}
 
+                {task.input_videos && task.input_videos.length > 0 && (
+                  <div>
+                    <Text strong>输入视频: </Text>
+                    <div style={{ marginTop: 8 }}>
+                      {task.input_videos.map((video, idx) => (
+                        <div key={idx}>
+                          <Text code style={{ fontSize: '12px' }}>
+                            {video.split('/').pop()}
+                          </Text>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* 配置信息 */}
-                {task.segment_duration && (
+                {(task.audio_segment_duration || task.segment_duration) && (
                   <div>
                     <Text strong>音频分割时长: </Text>
-                    <Text>{task.segment_duration} 秒</Text>
+                    <Text>{task.audio_segment_duration ?? task.segment_duration} 秒</Text>
+                  </div>
+                )}
+
+                {task.video_segment_duration && (
+                  <div>
+                    <Text strong>视频分割时长: </Text>
+                    <Text>{task.video_segment_duration} 秒</Text>
                   </div>
                 )}
 
@@ -238,6 +269,46 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
                     </div>
                   </div>
                 )}
+
+                {/* 输出视频下载 */}
+                {task.stage === 'completed' && task.output_prefix && task.logs && task.logs.length > 0 && (() => {
+                  const reversedLogs = [...task.logs].reverse()
+                  const finalLog = reversedLogs.find(
+                    (log) => log.details && Array.isArray(log.details.final_videos)
+                  )
+                  const finalVideos: string[] = finalLog?.details?.final_videos || []
+
+                  if (!finalVideos.length) return null
+
+                  return (
+                    <div>
+                      <Text strong>输出视频下载: </Text>
+                      <div style={{ marginTop: 8 }}>
+                        <Space wrap>
+                          {finalVideos.map((filename) => (
+                            <a
+                              key={filename}
+                              href={`/api/videos/${encodeURIComponent(task.output_prefix!)}/${encodeURIComponent(
+                                filename
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <Button
+                                type="default"
+                                size="small"
+                                icon={<DownloadOutlined />}
+                                style={{ marginRight: 8 }}
+                              >
+                                {filename}
+                              </Button>
+                            </a>
+                          ))}
+                        </Space>
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* 当前任务 */}
                 {task.current_task && (

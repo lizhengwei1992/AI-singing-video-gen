@@ -28,7 +28,7 @@
     },
     "class_type": "SeedVR2VideoUpscaler",
     "_meta": {
-      "title": "SeedVR2 Video Upscaler (v2.5.10)"
+      "title": "SeedVR2 Video Upscaler (v2.5.17)"
     }
   },
   "13": {
@@ -43,11 +43,7 @@
       "decode_tile_overlap": 128,
       "tile_debug": "false",
       "offload_device": "cpu",
-      "cache_model": false,
-      "torch_compile_args": [
-        "19",
-        0
-      ]
+      "cache_model": false
     },
     "class_type": "SeedVR2LoadVAEModel",
     "_meta": {
@@ -62,29 +58,11 @@
       "swap_io_components": false,
       "offload_device": "cpu",
       "cache_model": false,
-      "attention_mode": "flash_attn",
-      "torch_compile_args": [
-        "19",
-        0
-      ]
+      "attention_mode": "flash_attn"
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {
       "title": "SeedVR2 (Down)Load DiT Model"
-    }
-  },
-  "19": {
-    "inputs": {
-      "backend": "inductor",
-      "mode": "default",
-      "fullgraph": false,
-      "dynamic": false,
-      "dynamo_cache_size_limit": 64,
-      "dynamo_recompile_limit": 128
-    },
-    "class_type": "SeedVR2TorchCompileSettings",
-    "_meta": {
-      "title": "SeedVR2 Torch Compile Settings"
     }
   },
   "21": {
@@ -136,8 +114,8 @@
   },
   "27": {
     "inputs": {
-      "width": 1920,
-      "height": 1080,
+      "width": 1080,
+      "height": 1920,
       "upscale_method": "lanczos",
       "keep_proportion": "pad",
       "pad_color": "0, 0, 0",

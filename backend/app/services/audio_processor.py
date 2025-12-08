@@ -27,7 +27,7 @@ class AudioProcessor:
         Returns:
             分割后的音频文件路径列表
         """
-        output_dir = f"{Config.COMFYUI_INPUT}/temp_segments"
+        output_dir = f"{Config.COMFYUI_INPUT}/temp_audio_segments"
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         # 生成唯一的输出前缀
@@ -163,16 +163,31 @@ class AudioProcessor:
         unique_prefix = f"{output_prefix}_{uuid.uuid4().hex[:8]}"
         output_pattern = f"{output_dir}/{unique_prefix}_%03d.mp4"
 
+        # 根据分割时长构建关键帧表达式，方便排查问题
+        force_key_frames_expr = f"expr:gte(t,n_forced*{segment_duration})"
+
         cmd = [
             'ffmpeg',
             '-i', video_path,
-            '-c', 'copy',
-            '-map', '0',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '18',
+            '-force_key_frames', force_key_frames_expr,
+            '-c:a', 'aac',
+            '-b:a', '192k',
             '-f', 'segment',
             '-segment_time', str(segment_duration),
             '-reset_timestamps', '1',
             output_pattern
         ]
+
+        # 调试输出：打印实际执行的 FFmpeg 命令和关键参数
+        print("[Video Split] 开始切分视频")
+        print(f"[Video Split] 输入视频: {video_path}")
+        print(f"[Video Split] 目标片段时长: {segment_duration} 秒")
+        print(f"[Video Split] 输出模式: {output_pattern}")
+        print(f"[Video Split] force_key_frames: {force_key_frames_expr}")
+        print("[Video Split] FFmpeg 命令:", " ".join(cmd))
 
         process = await asyncio.create_subprocess_exec(
             *cmd,

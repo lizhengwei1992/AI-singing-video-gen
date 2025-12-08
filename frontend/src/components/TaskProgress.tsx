@@ -219,7 +219,7 @@ const TaskProgress: React.FC<TaskProgressProps> = ({ status, isConnected }) => {
           {status && (status.input_images || status.input_audios || status.prompt) && (
             <Card size="small" title="生成参数信息" extra={<SettingOutlined />}>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                {/* 音频分割参数 */}
+                {/* 分割参数 */}
                 {status.segment_duration && (
                   <div>
                     <Text strong style={{ fontSize: '12px' }}>
@@ -296,6 +296,25 @@ const TaskProgress: React.FC<TaskProgressProps> = ({ status, isConnected }) => {
                           <List.Item style={{ padding: '4px 0', fontSize: '12px' }}>
                             <Text code style={{ fontSize: '11px' }}>
                               {audio.split('/').pop()}
+                            </Text>
+                          </List.Item>
+                        )}
+                      />
+                    </Collapse.Panel>
+                  )}
+
+                  {status.input_videos && status.input_videos.length > 0 && (
+                    <Collapse.Panel
+                      header={<span><FileImageOutlined /> 输入视频 ({status.input_videos.length}个)</span>}
+                      key="videos"
+                    >
+                      <List
+                        size="small"
+                        dataSource={status.input_videos}
+                        renderItem={(video) => (
+                          <List.Item style={{ padding: '4px 0', fontSize: '12px' }}>
+                            <Text code style={{ fontSize: '11px' }}>
+                              {video.split('/').pop()}
                             </Text>
                           </List.Item>
                         )}
