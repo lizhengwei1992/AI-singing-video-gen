@@ -187,10 +187,10 @@ class ComfyUIClient:
         workflow = json.loads(workflow_content)
 
         # 设置输入视频文件名（ComfyUI 相对 input 目录）
-        workflow["21"]["inputs"]["file"] = input_filename
+        workflow["968"]["inputs"]["video"] = input_filename
 
         # 设置输出前缀为原始文件名 + _sr
-        workflow["25"]["inputs"]["filename_prefix"] = output_prefix
+        workflow["1082"]["inputs"]["filename_prefix"] = output_prefix
 
         await self.execute_workflow(workflow)
 
