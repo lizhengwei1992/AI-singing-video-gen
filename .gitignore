@@ -13,3 +13,6 @@ node_modules
 .env.production
 .claude
 __pycache__/
+.DS_Store
+需求文档.md
+.claude/

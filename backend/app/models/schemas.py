@@ -69,6 +69,7 @@ class TaskStatus(BaseModel):
     prompt: Optional[str] = None  # 生成提示词
     mode: Optional[TaskMode] = None  # 任务模式
     input_videos: Optional[List[str]] = None  # 输入视频（仅超分模式）
+    output_name: Optional[str] = None  # video-gen任务的输出名称
     # 新增：任务日志
     logs: Optional[List[TaskLog]] = Field(default_factory=list)  # 任务执行日志
 
@@ -107,3 +108,37 @@ class BatchCompleteEvent(BaseModel):
 class ErrorEvent(BaseModel):
     message: str
     code: str
+
+class VideoGenMode(str, Enum):
+    SINGLE_IMAGE = "single_image"
+    FIRST_LAST_FRAME = "first_last_frame"
+
+class VideoGenSubmitRequest(BaseModel):
+    mode: VideoGenMode
+    outputName: str = Field(min_length=1, max_length=50)
+    positivePrompt: str
+    negativePrompt: str
+    videoLength: int = Field(default=81, ge=1, le=1000)
+    needUpscale: bool = Field(default=False)
+    singleImage: Optional[str] = Field(default=None, description="单图生视频模式的图片路径")
+    firstFrameImage: Optional[str] = Field(default=None, description="首尾帧生视频模式的首帧图片路径")
+    lastFrameImage: Optional[str] = Field(default=None, description="首尾帧生视频模式的尾帧图片路径")
+
+class VideoGenSubmitResponse(BaseModel):
+    trace_id: str
+    message: str
+
+class ImageToPromptSubmitRequest(BaseModel):
+    image: str = Field(description="图片路径")
+    prompt: str = Field(description="用户输入的提示词")
+
+class ImageToPromptSubmitResponse(BaseModel):
+    generated_prompt: str = Field(description="生成的提示词文本")
+
+class ImageToStoryboardSubmitRequest(BaseModel):
+    image: str = Field(description="图片路径")
+    prompt: str = Field(description="用户输入的提示词")
+    outputFilename: str = Field(description="输出文件名前缀")
+
+class ImageToStoryboardSubmitResponse(BaseModel):
+    output_files: List[str] = Field(description="生成的图片文件路径列表")

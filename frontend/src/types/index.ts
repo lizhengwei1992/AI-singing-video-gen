@@ -27,6 +27,45 @@ export interface TaskConfig {
   srInputVideo?: string
 }
 
+export interface VideoGenConfig {
+  // 视频生成模式
+  mode: 'single_image' | 'first_last_frame'
+  // 输出视频名称
+  outputName: string
+  // 正向提示词
+  positivePrompt: string
+  // 反向提示词
+  negativePrompt: string
+  // 视频长度（帧数）
+  videoLength: number
+  // 是否需要超分
+  needUpscale: boolean
+  // 单图生视频：单张图片路径
+  singleImage?: string
+  // 首尾帧生视频：首帧图片路径
+  firstFrameImage?: string
+  // 首尾帧生视频：尾帧图片路径
+  lastFrameImage?: string
+}
+
+export interface ImageGenConfig {
+  // 功能模式
+  mode: 'image_to_prompt' | 'image_to_storyboard'
+  // 图生提示词配置
+  imageToPrompt?: {
+    image?: string
+    prompt: string
+    generatedPrompt?: string
+  }
+  // 单图生成分镜配置
+  imageToStoryboard?: {
+    image?: string
+    prompt: string
+    outputFilename: string
+    outputFiles?: string[]
+  }
+}
+
 export interface TaskStatus {
   trace_id: string
   stage: 'pending' | 'splitting' | 'processing' | 'combining' | 'completed' | 'failed'
@@ -43,7 +82,8 @@ export interface TaskStatus {
   segment_duration?: number
   output_prefix?: string
   prompt?: string
-  mode?: 'generate_and_upscale' | 'upscale_only'
+  mode?: 'generate_and_upscale' | 'upscale_only' | 'video_gen'
+  output_name?: string  // video-gen任务的输出名称
   // 新增：任务日志
   logs?: TaskLog[]
 }

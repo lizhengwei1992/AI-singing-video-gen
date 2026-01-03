@@ -3,14 +3,83 @@ import uuid
 import hashlib
 import threading
 import time
+import subprocess
+import asyncio
+import functools
+import websocket
+import requests
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 import aiofiles
 
-from app.models.schemas import BatchSubmitRequest, BatchSubmitResponse, TaskMode
+from app.models.schemas import (
+    BatchSubmitRequest, BatchSubmitResponse, TaskMode, 
+    VideoGenSubmitRequest, VideoGenSubmitResponse, VideoGenMode,
+    ImageToPromptSubmitRequest, ImageToPromptSubmitResponse,
+    ImageToStoryboardSubmitRequest, ImageToStoryboardSubmitResponse
+)
 from app.services.task_manager_instance import task_manager
+from app.services.comfyui_client import ComfyUIClient
 from config import Config
+
+# 辅助函数：重启ComfyUI
+async def _restart_comfyui():
+    """重启ComfyUI服务"""
+    async def _run_blocking(func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+    
+    def _test_ws_connection(client_id: str):
+        """同步检查ComfyUI WebSocket连接"""
+        test_ws = websocket.WebSocket()
+        test_ws.connect(f"ws://127.0.0.1:8090/ws?clientId={client_id}", timeout=10)
+        test_ws.close()
+    
+    try:
+        # 查找并kill ComfyUI进程
+        try:
+            result = await _run_blocking(
+                subprocess.run,
+                ['lsof', '-ti', ':8090'],
+                capture_output=True,
+                text=True
+            )
+            if result.stdout.strip():
+                pid = result.stdout.strip()
+                await _run_blocking(subprocess.run, ['kill', '-9', pid], check=True)
+                await asyncio.sleep(3)  # 等待进程完全终止
+        except subprocess.CalledProcessError:
+            pass
+        
+        # 启动ComfyUI
+        cmd = f"tmux send-keys -t gen_video:1 'cd /home/lzw/project/ComfyUI && python main.py --port 8090 --listen' C-m"
+        await _run_blocking(subprocess.run, cmd, shell=True, check=True)
+        
+        # 等待服务启动
+        max_retries = 60
+        for i in range(max_retries):
+            try:
+                response = await _run_blocking(
+                    requests.get,
+                    f"http://127.0.0.1:8090/system_stats",
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    try:
+                        await _run_blocking(_test_ws_connection, f"test_{i}")
+                        await asyncio.sleep(5)  # 等待服务完全就绪
+                        return True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            await asyncio.sleep(3)
+        
+        return False
+    except Exception as e:
+        print(f"重启ComfyUI失败: {str(e)}")
+        return False
 
 router = APIRouter()
 
@@ -415,3 +484,275 @@ async def download_video(output_prefix: str, filename: str):
         media_type="video/mp4",
         filename=filename
     )
+
+@router.get("/video-gen/videos/{output_name}")
+async def get_video_gen_video(output_name: str):
+    """获取video-gen生成的视频文件"""
+    if ".." in output_name or "/" in output_name or "\\" in output_name:
+        raise HTTPException(status_code=400, detail="无效的输出名称")
+    
+    # 查找ComfyUI output目录中的视频文件
+    output_dir = Path(Config.COMFYUI_OUTPUT)
+    video_files = []
+    
+    # 查找匹配的视频文件
+    for pattern in [f"{output_name}_00001.mp4", f"{output_name}_sr_00001.mp4"]:
+        video_path = output_dir / pattern
+        if video_path.exists() and video_path.is_file():
+            video_files.append({
+                "filename": pattern,
+                "path": str(video_path),
+                "size": video_path.stat().st_size,
+                "modified": video_path.stat().st_mtime
+            })
+    
+    return {"videos": video_files}
+
+@router.get("/video-gen/videos/{output_name}/{filename}")
+async def download_video_gen_video(output_name: str, filename: str):
+    """下载video-gen生成的视频文件"""
+    if ".." in output_name or "/" in output_name or "\\" in output_name:
+        raise HTTPException(status_code=400, detail="无效的输出名称")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    
+    video_path = Path(Config.COMFYUI_OUTPUT) / filename
+    
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    
+    return FileResponse(
+        video_path,
+        media_type="video/mp4",
+        filename=filename
+    )
+
+@router.post("/video-gen/submit")
+async def submit_video_gen_task(request: VideoGenSubmitRequest):
+    """提交视频生成任务（单图生视频或首尾帧生视频）"""
+    try:
+        # 验证输入文件
+        if request.mode == VideoGenMode.SINGLE_IMAGE:
+            if not request.singleImage:
+                raise HTTPException(
+                    status_code=400,
+                    detail="单图生视频模式必须提供singleImage"
+                )
+            if not os.path.exists(request.singleImage):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"图片文件不存在: {request.singleImage}"
+                )
+        elif request.mode == VideoGenMode.FIRST_LAST_FRAME:
+            if not request.firstFrameImage or not request.lastFrameImage:
+                raise HTTPException(
+                    status_code=400,
+                    detail="首尾帧生视频模式必须提供firstFrameImage和lastFrameImage"
+                )
+            if not os.path.exists(request.firstFrameImage):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"首帧图片文件不存在: {request.firstFrameImage}"
+                )
+            if not os.path.exists(request.lastFrameImage):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"尾帧图片文件不存在: {request.lastFrameImage}"
+                )
+
+        # 生成任务ID
+        trace_id = str(uuid.uuid4())
+
+        # 获取图片文件名（相对于ComfyUI input目录）
+        if request.mode == VideoGenMode.SINGLE_IMAGE:
+            # 从完整路径中提取文件名
+            image_filename = os.path.basename(request.singleImage)
+            # 如果路径包含uploaded_images，则使用相对路径
+            if "uploaded_images" in request.singleImage:
+                image_filename = f"uploaded_images/{image_filename}"
+        else:
+            first_frame_filename = os.path.basename(request.firstFrameImage)
+            last_frame_filename = os.path.basename(request.lastFrameImage)
+            if "uploaded_images" in request.firstFrameImage:
+                first_frame_filename = f"uploaded_images/{first_frame_filename}"
+            if "uploaded_images" in request.lastFrameImage:
+                last_frame_filename = f"uploaded_images/{last_frame_filename}"
+
+        # 创建ComfyUI客户端并执行工作流
+        client = ComfyUIClient()
+
+        if request.mode == VideoGenMode.SINGLE_IMAGE:
+            # 执行单图生视频
+            output_files = await client.execute_single_image_to_video(
+                image_path=image_filename,
+                output_prefix=request.outputName,
+                positive_prompt=request.positivePrompt,
+                negative_prompt=request.negativePrompt,
+                video_length=request.videoLength
+            )
+        else:
+            # 执行首尾帧生视频
+            output_files = await client.execute_first_last_frame_to_video(
+                first_frame_path=first_frame_filename,
+                last_frame_path=last_frame_filename,
+                output_prefix=request.outputName,
+                positive_prompt=request.positivePrompt,
+                negative_prompt=request.negativePrompt,
+                video_length=request.videoLength
+            )
+
+        # 如果需要超分，执行超分处理
+        final_output_name = request.outputName
+        if request.needUpscale and output_files:
+            # 获取生成的视频文件
+            generated_video_path = output_files[0]
+            video_filename = os.path.basename(generated_video_path)
+            
+            # 将生成的视频复制到input目录以便超分
+            input_video_dir = Path(Config.COMFYUI_INPUT) / "uploaded_videos"
+            input_video_dir.mkdir(parents=True, exist_ok=True)
+            input_video_path = input_video_dir / video_filename
+            
+            # 复制文件
+            import shutil
+            shutil.copy2(generated_video_path, input_video_path)
+            
+            # 执行超分（使用相对路径）
+            final_output_name = f"{request.outputName}_sr"
+            sr_output_files = await client.execute_video_super_resolution(
+                input_filename=f"uploaded_videos/{video_filename}",
+                output_prefix=final_output_name
+            )
+            output_files = sr_output_files
+
+        # 保存任务状态
+        from app.models.schemas import TaskStatus, TaskStage, TaskLog
+        from datetime import datetime
+        import json
+        
+        task_status = TaskStatus(
+            trace_id=trace_id,
+            stage=TaskStage.COMPLETED,
+            progress=1.0,
+            completed=1,
+            total=1,
+            output_prefix=final_output_name,
+            output_name=final_output_name,  # video-gen任务的输出名称
+            mode=TaskMode.GENERATE_AND_UPSCALE,  # 使用现有枚举，但通过output_name区分
+            logs=[
+                TaskLog(
+                    timestamp=datetime.now().isoformat(),
+                    level="info",
+                    message="视频生成任务完成",
+                    details={"output_files": [os.path.basename(f) for f in output_files]}
+                )
+            ]
+        )
+        
+        # 保存任务状态到文件
+        task_status_dir = Path(Config.TASK_STATUS)
+        task_status_dir.mkdir(parents=True, exist_ok=True)
+        task_status_file = task_status_dir / f"{trace_id}.json"
+        with open(task_status_file, 'w', encoding='utf-8') as f:
+            json.dump(task_status.dict(), f, ensure_ascii=False, indent=2)
+
+        return VideoGenSubmitResponse(
+            trace_id=trace_id,
+            message="视频生成任务提交成功"
+        )
+
+    except Exception as e:
+        print(f"视频生成任务提交错误: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"任务提交失败: {str(e)}"
+        )
+
+@router.post("/image-gen/image-to-prompt")
+async def submit_image_to_prompt_task(request: ImageToPromptSubmitRequest):
+    """提交图生提示词任务"""
+    try:
+        # 验证输入文件
+        if not request.image:
+            raise HTTPException(status_code=400, detail="必须提供图片路径")
+        if not os.path.exists(request.image):
+            raise HTTPException(status_code=400, detail=f"图片文件不存在: {request.image}")
+        
+        # 获取图片文件名（相对于ComfyUI input目录）
+        image_filename = os.path.basename(request.image)
+        if "uploaded_images" in request.image:
+            image_filename = f"uploaded_images/{image_filename}"
+        
+        # 创建ComfyUI客户端并执行工作流
+        client = ComfyUIClient()
+        
+        # 执行图生提示词
+        generated_prompt = await client.execute_image_to_prompt(
+            image_path=image_filename,
+            prompt=request.prompt
+        )
+        
+        # 重启ComfyUI
+        await _restart_comfyui()
+        
+        return ImageToPromptSubmitResponse(generated_prompt=generated_prompt)
+    
+    except Exception as e:
+        print(f"图生提示词任务提交错误: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"任务提交失败: {str(e)}"
+        )
+
+@router.post("/image-gen/image-to-storyboard")
+async def submit_image_to_storyboard_task(request: ImageToStoryboardSubmitRequest):
+    """提交单图根据提示词生成分镜任务"""
+    try:
+        # 验证输入文件
+        if not request.image:
+            raise HTTPException(status_code=400, detail="必须提供图片路径")
+        if not os.path.exists(request.image):
+            raise HTTPException(status_code=400, detail=f"图片文件不存在: {request.image}")
+        
+        # 获取图片文件名（相对于ComfyUI input目录）
+        image_filename = os.path.basename(request.image)
+        if "uploaded_images" in request.image:
+            image_filename = f"uploaded_images/{image_filename}"
+        
+        # 创建ComfyUI客户端并执行工作流
+        client = ComfyUIClient()
+        
+        # 执行单图根据提示词生成分镜
+        output_files = await client.execute_image_to_storyboard(
+            image_path=image_filename,
+            prompt=request.prompt,
+            output_filename=request.outputFilename
+        )
+        
+        # 重启ComfyUI
+        await _restart_comfyui()
+        
+        # 只返回文件名，不返回完整路径
+        output_filenames = [os.path.basename(f) for f in output_files]
+        
+        return ImageToStoryboardSubmitResponse(output_files=output_filenames)
+    
+    except Exception as e:
+        print(f"单图生成分镜任务提交错误: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"任务提交失败: {str(e)}"
+        )
+
+@router.get("/image-gen/output/{filename}")
+async def get_image_gen_output(filename: str):
+    """获取image-gen生成的图片文件"""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    
+    image_path = Path(Config.COMFYUI_OUTPUT) / filename
+    
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+    
+    return FileResponse(image_path)

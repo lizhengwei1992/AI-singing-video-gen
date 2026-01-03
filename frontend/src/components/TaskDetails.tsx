@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { Card, Collapse, Typography, Space, Tag, Button, Empty, message, Popconfirm } from 'antd'
-import { ReloadOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Card, Collapse, Typography, Space, Tag, Button, Empty, message, Popconfirm, Pagination } from 'antd'
+import { ReloadOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined, PlayCircleOutlined } from '@ant-design/icons'
 
 const { Text, Title } = Typography
 const { Panel } = Collapse
@@ -27,7 +27,8 @@ interface TaskStatus {
   output_prefix?: string
   prompt?: string
   current_task?: any
-  mode?: 'generate_and_upscale' | 'upscale_only'
+  mode?: 'generate_and_upscale' | 'upscale_only' | 'video_gen'
+  output_name?: string  // video-gen任务的输出名称
 }
 
 interface TaskDetailsProps {
@@ -39,6 +40,50 @@ interface TaskDetailsProps {
 
 const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, onTaskDelete }) => {
   const [activeKeys, setActiveKeys] = useState<string[]>([])
+  const [videoGenVideos, setVideoGenVideos] = useState<Record<string, any[]>>({})
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
+
+  // 按时间排序任务，最新在最前面
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      // 从任务名称中提取时间戳，格式：YYYY-MM-DDTHH-MM-SS_xxx
+      const getTimeFromName = (task: TaskStatus): number => {
+        const name = task.output_name || task.output_prefix || ''
+        // 尝试从名称中提取时间戳，格式：YYYY-MM-DDTHH-MM-SS
+        const timeMatch = name.match(/^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})/)
+        if (timeMatch) {
+          // 将格式转换为标准ISO格式：YYYY-MM-DDTHH:MM:SS
+          const timeStr = timeMatch[1].replace(/(\d{4}-\d{2}-\d{2}T)(\d{2})-(\d{2})-(\d{2})/, '$1$2:$3:$4')
+          const date = new Date(timeStr)
+          if (!isNaN(date.getTime())) {
+            return date.getTime()
+          }
+        }
+        // 如果没有时间戳，从logs中获取最早的时间
+        if (task.logs && task.logs.length > 0) {
+          const firstLog = task.logs[0]
+          const logTime = new Date(firstLog.timestamp).getTime()
+          if (!isNaN(logTime)) {
+            return logTime
+          }
+        }
+        // 如果都没有，使用0作为默认值（会排到最后）
+        return 0
+      }
+      
+      const timeA = getTimeFromName(a)
+      const timeB = getTimeFromName(b)
+      return timeB - timeA // 降序，最新的在前
+    })
+  }, [tasks])
+
+  // 分页后的任务列表
+  const paginatedTasks = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    const end = start + pageSize
+    return sortedTasks.slice(start, end)
+  }, [sortedTasks, currentPage, pageSize])
 
   const getStageColor = (stage: string) => {
     switch (stage) {
@@ -67,6 +112,31 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
   const formatDate = (timestamp: string) => {
     return new Date(timestamp).toLocaleString('zh-CN')
   }
+
+  const loadVideoGenVideos = async (outputName: string) => {
+    try {
+      const response = await fetch(`/api/video-gen/videos/${encodeURIComponent(outputName)}`)
+      if (!response.ok) {
+        throw new Error('获取视频列表失败')
+      }
+      const data = await response.json()
+      setVideoGenVideos(prev => ({
+        ...prev,
+        [outputName]: data.videos || []
+      }))
+    } catch (error) {
+      console.error('加载视频失败:', error)
+    }
+  }
+
+  useEffect(() => {
+    // 为所有video-gen任务加载视频
+    tasks.forEach(task => {
+      if (task.stage === 'completed' && task.output_name && !videoGenVideos[task.output_name]) {
+        loadVideoGenVideos(task.output_name)
+      }
+    })
+  }, [tasks])
 
   const togglePanel = (key: string) => {
     setActiveKeys(prev =>
@@ -114,23 +184,26 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
       }
       style={{ height: '100%' }}
     >
-      {tasks.length === 0 ? (
+      {sortedTasks.length === 0 ? (
         <Empty
           description="暂无任务"
           style={{ padding: '40px 0' }}
         />
       ) : (
-        <Collapse
-          activeKey={activeKeys}
-          onChange={setActiveKeys}
-          style={{ background: '#fff' }}
-        >
-          {tasks.map((task, index) => (
+        <>
+          <Collapse
+            activeKey={activeKeys}
+            onChange={setActiveKeys}
+            style={{ background: '#fff' }}
+          >
+            {paginatedTasks.map((task, index) => (
             <Panel
               key={task.trace_id}
               header={
                 <Space>
-                  <Text strong>任务 {task.trace_id.slice(0, 8)}</Text>
+                  <Text strong>
+                    {task.output_name || task.output_prefix || `任务 ${task.trace_id.slice(0, 8)}`}
+                  </Text>
                   <Tag color={getStageColor(task.stage)}>
                     {getStageText(task.stage)}
                   </Tag>
@@ -270,8 +343,8 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
                   </div>
                 )}
 
-                {/* 输出视频下载 */}
-                {task.stage === 'completed' && task.output_prefix && task.logs && task.logs.length > 0 && (() => {
+                {/* 输出视频展示和下载 - AI-singing-video-gen任务 */}
+                {task.stage === 'completed' && task.output_prefix && !task.output_name && task.logs && task.logs.length > 0 && (() => {
                   const reversedLogs = [...task.logs].reverse()
                   const finalLog = reversedLogs.find(
                     (log) => log.details && Array.isArray(log.details.final_videos)
@@ -303,6 +376,62 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
                                 {filename}
                               </Button>
                             </a>
+                          ))}
+                        </Space>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* 输出视频展示和下载 - video-gen任务 */}
+                {task.stage === 'completed' && task.output_name && (() => {
+                  const videos = videoGenVideos[task.output_name] || []
+                  
+                  if (!videos.length) {
+                    // 尝试加载视频
+                    if (!videoGenVideos[task.output_name]) {
+                      loadVideoGenVideos(task.output_name)
+                    }
+                    return null
+                  }
+
+                  return (
+                    <div>
+                      <Text strong>生成的视频: </Text>
+                      <div style={{ marginTop: 8 }}>
+                        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                          {videos.map((video) => (
+                            <Card key={video.filename} size="small" style={{ marginBottom: 8 }}>
+                              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                                <div>
+                                  <Text strong>{video.filename}</Text>
+                                  <Text type="secondary" style={{ marginLeft: 8, fontSize: '12px' }}>
+                                    ({(video.size / 1024 / 1024).toFixed(2)} MB)
+                                  </Text>
+                                </div>
+                                <video
+                                  controls
+                                  style={{ width: '100%', maxWidth: '600px', borderRadius: '4px' }}
+                                  src={`/api/video-gen/videos/${encodeURIComponent(task.output_name!)}/${encodeURIComponent(video.filename)}`}
+                                >
+                                  您的浏览器不支持视频播放
+                                </video>
+                                <div>
+                                  <a
+                                    href={`/api/video-gen/videos/${encodeURIComponent(task.output_name!)}/${encodeURIComponent(video.filename)}`}
+                                    download={video.filename}
+                                  >
+                                    <Button
+                                      type="primary"
+                                      size="small"
+                                      icon={<DownloadOutlined />}
+                                    >
+                                      下载视频
+                                    </Button>
+                                  </a>
+                                </div>
+                              </Space>
+                            </Card>
                           ))}
                         </Space>
                       </div>
@@ -396,7 +525,21 @@ const TaskDetails: React.FC<TaskDetailsProps> = ({ tasks, onRefresh, loading, on
               </Space>
             </Panel>
           ))}
-        </Collapse>
+          </Collapse>
+          <div style={{ marginTop: 16, textAlign: 'right' }}>
+            <Pagination
+              current={currentPage}
+              total={sortedTasks.length}
+              pageSize={pageSize}
+              onChange={(page) => {
+                setCurrentPage(page)
+                setActiveKeys([]) // 切换页面时关闭所有展开的面板
+              }}
+              showSizeChanger={false}
+              showTotal={(total) => `共 ${total} 个任务`}
+            />
+          </div>
+        </>
       )}
     </Card>
   )

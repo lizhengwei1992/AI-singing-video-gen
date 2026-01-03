@@ -200,3 +200,347 @@ class ComfyUIClient:
             raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到超分结果: {expected_video}")
 
         return [str(expected_video)]
+
+    async def execute_single_image_to_video(
+        self,
+        image_path: str,
+        output_prefix: str,
+        positive_prompt: str,
+        negative_prompt: str,
+        video_length: int
+    ) -> List[str]:
+        """
+        使用单图生视频工作流生成视频
+        :param image_path: 已放置到 ComfyUI input 目录的图片文件名
+        :param output_prefix: 输出文件前缀
+        :param positive_prompt: 正向提示词
+        :param negative_prompt: 反向提示词
+        :param video_length: 视频长度（帧数）
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/单图生视频.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置输入图片文件名（ComfyUI 相对 input 目录）
+        # node 156 是 LoadImage
+        workflow["156"]["inputs"]["image"] = image_path
+
+        # 设置正向提示词
+        # node 125 是 Text Input
+        workflow["125"]["inputs"]["text"] = positive_prompt
+
+        # 设置反向提示词
+        # node 118 是 CLIPTextEncode (负向提示词)
+        workflow["118"]["inputs"]["text"] = negative_prompt
+
+        # 设置视频长度（帧数）
+        # node 153 是 Int (视频长度)
+        workflow["153"]["inputs"]["Number"] = str(video_length)
+
+        # 设置输出前缀
+        # node 112 是 VHS_VideoCombine
+        workflow["112"]["inputs"]["filename_prefix"] = output_prefix
+
+        await self.execute_workflow(workflow)
+
+        # 单图生视频工作流输出 mp4 文件，验证其存在性
+        expected_video = Path(Config.COMFYUI_OUTPUT) / f"{output_prefix}_00001.mp4"
+        if not expected_video.exists():
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到生成结果: {expected_video}")
+
+        return [str(expected_video)]
+
+    async def execute_first_last_frame_to_video(
+        self,
+        first_frame_path: str,
+        last_frame_path: str,
+        output_prefix: str,
+        positive_prompt: str,
+        negative_prompt: str,
+        video_length: int
+    ) -> List[str]:
+        """
+        使用首尾帧生视频工作流生成视频
+        :param first_frame_path: 已放置到 ComfyUI input 目录的首帧图片文件名
+        :param last_frame_path: 已放置到 ComfyUI input 目录的尾帧图片文件名
+        :param output_prefix: 输出文件前缀
+        :param positive_prompt: 正向提示词
+        :param negative_prompt: 反向提示词
+        :param video_length: 视频长度（帧数）
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/首尾帧生视频.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置首帧图片文件名
+        workflow["224"]["inputs"]["image"] = first_frame_path
+
+        # 设置尾帧图片文件名
+        workflow["243"]["inputs"]["image"] = last_frame_path
+
+        # 设置正向提示词
+        workflow["227"]["inputs"]["text"] = positive_prompt
+
+        # 设置反向提示词
+        workflow["220"]["inputs"]["text"] = negative_prompt
+
+        # 设置视频长度（帧数）
+        workflow["240"]["inputs"]["length"] = video_length
+
+        # 设置输出前缀
+        workflow["250"]["inputs"]["filename_prefix"] = output_prefix
+
+        await self.execute_workflow(workflow)
+
+        # 首尾帧生视频工作流输出 mp4 文件，验证其存在性
+        expected_video = Path(Config.COMFYUI_OUTPUT) / f"{output_prefix}_00001.mp4"
+        if not expected_video.exists():
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到生成结果: {expected_video}")
+
+        return [str(expected_video)]
+
+    async def execute_single_image_to_video(
+        self,
+        image_path: str,
+        output_prefix: str,
+        positive_prompt: str,
+        negative_prompt: str,
+        video_length: int
+    ) -> List[str]:
+        """
+        使用单图生视频工作流生成视频
+        :param image_path: 已放置到 ComfyUI input 目录的图片文件名
+        :param output_prefix: 输出文件前缀
+        :param positive_prompt: 正向提示词
+        :param negative_prompt: 反向提示词
+        :param video_length: 视频长度（帧数）
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/单图生视频.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置输入图片文件名（ComfyUI 相对 input 目录）
+        # node 156 是 LoadImage
+        workflow["156"]["inputs"]["image"] = image_path
+
+        # 设置正向提示词
+        # node 125 是 Text Input
+        workflow["125"]["inputs"]["text"] = positive_prompt
+
+        # 设置反向提示词
+        # node 118 是 CLIPTextEncode (负向提示词)
+        workflow["118"]["inputs"]["text"] = negative_prompt
+
+        # 设置视频长度（帧数）
+        # node 153 是 Int (视频长度)
+        workflow["153"]["inputs"]["Number"] = str(video_length)
+
+        # 设置输出前缀
+        # node 112 是 VHS_VideoCombine
+        workflow["112"]["inputs"]["filename_prefix"] = output_prefix
+
+        await self.execute_workflow(workflow)
+
+        # 单图生视频工作流输出 mp4 文件，验证其存在性
+        expected_video = Path(Config.COMFYUI_OUTPUT) / f"{output_prefix}_00001.mp4"
+        if not expected_video.exists():
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到生成结果: {expected_video}")
+
+        return [str(expected_video)]
+
+    async def execute_first_last_frame_to_video(
+        self,
+        first_frame_path: str,
+        last_frame_path: str,
+        output_prefix: str,
+        positive_prompt: str,
+        negative_prompt: str,
+        video_length: int
+    ) -> List[str]:
+        """
+        使用首尾帧生视频工作流生成视频
+        :param first_frame_path: 已放置到 ComfyUI input 目录的首帧图片文件名
+        :param last_frame_path: 已放置到 ComfyUI input 目录的尾帧图片文件名
+        :param output_prefix: 输出文件前缀
+        :param positive_prompt: 正向提示词
+        :param negative_prompt: 反向提示词
+        :param video_length: 视频长度（帧数）
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/首尾帧生视频.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置首帧图片文件名
+        workflow["224"]["inputs"]["image"] = first_frame_path
+
+        # 设置尾帧图片文件名
+        workflow["243"]["inputs"]["image"] = last_frame_path
+
+        # 设置正向提示词
+        workflow["227"]["inputs"]["text"] = positive_prompt
+
+        # 设置反向提示词
+        workflow["220"]["inputs"]["text"] = negative_prompt
+
+        # 设置视频长度（帧数）
+        workflow["240"]["inputs"]["length"] = video_length
+
+        # 设置输出前缀
+        workflow["250"]["inputs"]["filename_prefix"] = output_prefix
+
+        await self.execute_workflow(workflow)
+
+        # 首尾帧生视频工作流输出 mp4 文件，验证其存在性
+        expected_video = Path(Config.COMFYUI_OUTPUT) / f"{output_prefix}_00001.mp4"
+        if not expected_video.exists():
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到生成结果: {expected_video}")
+
+        return [str(expected_video)]
+    async def execute_image_to_prompt(
+        self,
+        image_path: str,
+        prompt: str
+    ) -> str:
+        """
+        使用图生提示词工作流生成提示词
+        :param image_path: 已放置到 ComfyUI input 目录的图片文件名
+        :param prompt: 用户输入的提示词
+        :return: 生成的提示词文本
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/图生提示词.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置输入图片文件名（ComfyUI 相对 input 目录）
+        # node 13 是 LoadImage
+        workflow["13"]["inputs"]["image"] = image_path
+
+        # 设置提示词文本
+        # node 11 是 Text Multiline
+        workflow["11"]["inputs"]["text"] = prompt
+
+        # 执行工作流并获取prompt_id
+        prompt_id = str(uuid.uuid4())
+        
+        # 提交工作流
+        self.queue_prompt(workflow, prompt_id)
+        
+        # 连接 WebSocket 监听执行状态
+        ws = websocket.WebSocket()
+        ws.connect(f"ws://{self.server_address}/ws?clientId={self.client_id}")
+        
+        start_time = time.monotonic()
+        timeout = 900
+        
+        try:
+            while True:
+                if time.monotonic() - start_time > timeout:
+                    raise TimeoutError(f"工作流执行超时 ({timeout/60}分钟)")
+                
+                out = ws.recv()
+                if isinstance(out, str):
+                    message = json.loads(out)
+                    if message['type'] == 'executing':
+                        data = message['data']
+                        if data['node'] is None and data['prompt_id'] == prompt_id:
+                            self._log_info("图生提示词工作流执行完成")
+                            break
+                else:
+                    continue
+        finally:
+            ws.close()
+        
+        # 从history获取文本输出
+        history = self.get_history(prompt_id)
+        if prompt_id not in history:
+            raise Exception(f"提示 {prompt_id} 未找到执行历史")
+
+        prompt_history = history[prompt_id]
+
+        # 工作流中 node 1 是 easy showAnything，它从 node 7 (Qwen3_VQA) 获取输出
+        # 优先查找 node 1 的输出
+        if 'outputs' in prompt_history:
+            # 尝试从 node 1 (easy showAnything) 获取输出
+            if '1' in prompt_history['outputs']:
+                node_output = prompt_history['outputs']['1']
+                # easy showAnything 的输出通常在 text 字段中
+                if 'text' in node_output and len(node_output['text']) > 0:
+                    return node_output['text'][0]
+
+            # 如果 node 1 没有输出，尝试从 node 7 (Qwen3_VQA) 获取
+            if '7' in prompt_history['outputs']:
+                node_output = prompt_history['outputs']['7']
+                # Qwen3_VQA 的输出格式可能不同，尝试多种可能
+                if 'text' in node_output and len(node_output['text']) > 0:
+                    return node_output['text'][0]
+                # 有些版本的 ComfyUI 可能使用不同的字段名
+                for key in ['text', 'output', 'result', 'response']:
+                    if key in node_output:
+                        value = node_output[key]
+                        if isinstance(value, list) and len(value) > 0:
+                            return value[0]
+                        elif isinstance(value, str) and value.strip():
+                            return value
+
+        # 如果找不到，记录调试信息并返回错误
+        print(f"工作流执行历史: {json.dumps(prompt_history, indent=2, ensure_ascii=False)}")
+        raise Exception("未能从工作流执行结果中获取文本输出")
+
+    async def execute_image_to_storyboard(
+        self,
+        image_path: str,
+        prompt: str,
+        output_filename: str
+    ) -> List[str]:
+        """
+        使用单图根据提示词生成分镜工作流生成图片
+        :param image_path: 已放置到 ComfyUI input 目录的图片文件名
+        :param prompt: 用户输入的提示词
+        :param output_filename: 输出文件名前缀
+        :return: 生成的图片文件路径列表
+        """
+        workflow_path = f"{Config.WORKFLOW_PATH}/单图根据提示词生成分镜.json"
+        async with aiofiles.open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = await f.read()
+
+        workflow = json.loads(workflow_content)
+
+        # 设置输入图片文件名（ComfyUI 相对 input 目录）
+        # node 34 是 LoadImage
+        workflow["34"]["inputs"]["image"] = image_path
+
+        # 设置提示词文本
+        # node 54 是 Text Multiline
+        workflow["54"]["inputs"]["text"] = prompt
+
+        # 设置输出文件名前缀
+        # node 16 是 SaveImage
+        workflow["16"]["inputs"]["filename_prefix"] = output_filename
+
+        # 执行工作流
+        await self.execute_workflow(workflow)
+
+        # 单图根据提示词生成分镜工作流输出图片文件，查找输出文件
+        output_dir = Path(Config.COMFYUI_OUTPUT)
+        # 查找匹配的文件（SaveImage通常会在文件名后添加序号）
+        output_files = list(output_dir.glob(f"{output_filename}_*.png"))
+        if not output_files:
+            # 也可能没有序号
+            output_file = output_dir / f"{output_filename}.png"
+            if output_file.exists():
+                output_files = [output_file]
+        
+        if not output_files:
+            raise FileNotFoundError(f"未在 ComfyUI 输出目录中找到生成结果，文件名前缀: {output_filename}")
+
+        return [str(f) for f in sorted(output_files)]
